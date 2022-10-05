@@ -9,32 +9,53 @@ import numpy as np
 import os
 from glob import glob
 from os.path import join
+from sys import platform
 
-
-min_cython_ver = '0.21.0'
-try:
-    import Cython
-    ver = Cython.__version__
-    _CYTHON_INSTALLED = ver >= LooseVersion(min_cython_ver)
-except ImportError:
-    _CYTHON_INSTALLED = False
 
 try:
-    if not _CYTHON_INSTALLED:
-        raise ImportError('No supported version of Cython installed.')
+    from Cython.Build import cythonize
     from Cython.Distutils import build_ext
-    cython = True
-except ImportError:
-    cython = False
-
-if cython:
-    ext = '.pyx'
     cmdclass = {'build_ext': build_ext}
-else:
-    ext = '.cpp'
+except ImportError:
+    cythonize = None
     cmdclass = {}
-    if not os.path.exists(join("pyreaper", "creaper" + ext)):
-        raise RuntimeError("Cython is required to generate C++ wrapper.")
+
+# https://cython.readthedocs.io/en/latest/src/userguide/source_files_and_compilation.html#distributing-cython-modules
+def no_cythonize(extensions, **_ignore):
+    for extension in extensions:
+        sources = []
+        for sfile in extension.sources:
+            path, ext = os.path.splitext(sfile)
+            if ext in (".pyx", ".py"):
+                if extension.language == "c++":
+                    ext = ".cpp"
+                else:
+                    ext = ".c"
+                sfile = path + ext
+            sources.append(sfile)
+        extension.sources[:] = sources
+    return extensions
+
+
+COMPILE_ARGS = [
+    "-std=c++11",
+    "-funsigned-char",
+]
+if os.name != "nt":
+    COMPILE_ARGS.append("-Wno-register")
+    COMPILE_ARGS.append("-Wno-unused-function")
+    COMPILE_ARGS.append("-Wno-unused-local-typedefs")
+
+if platform.startswith("darwin"):
+    COMPILE_ARGS.append("-stdlib=libc++")
+    COMPILE_ARGS.append("-mmacosx-version-min=10.7")
+
+
+
+
+ext = '.pyx'
+compiler_directives = {"language_level": 3, "embedsignature": True}
+
 
 # REAPER source location
 src_top = join("lib", "REAPER")
@@ -45,13 +66,22 @@ print(src)
 
 
 # define core cython module
-ext_modules = [Extension(
+extensions = [Extension(
     name="pyreaper.creaper",
     sources=[join("pyreaper", "creaper" + ext)] + src,
     include_dirs=[np.get_include(), join(os.getcwd(), "lib", "REAPER")],
-    extra_compile_args=[],
+    extra_compile_args=COMPILE_ARGS,
     language="c++",
 )]
+
+
+CYTHONIZE = bool(int(os.getenv("CYTHONIZE", 0))) and cythonize is not None
+
+if CYTHONIZE:
+    compiler_directives = {"language_level": 3, "embedsignature": True}
+    extensions = cythonize(extensions, compiler_directives=compiler_directives)
+else:
+    extensions = no_cythonize(extensions)
 
 with open('README.md', 'r') as fd:
     long_description = fd.read()
@@ -67,7 +97,7 @@ setup(
     url='https://github.com/r9y9/pyreaper',
     license='MIT',
     packages=find_packages(),
-    ext_modules=ext_modules,
+    ext_modules=extensions,
     cmdclass=cmdclass,
     install_requires=[
         'numpy >= 1.8.0',
@@ -75,7 +105,6 @@ setup(
     tests_require=['nose', 'coverage'],
     extras_require={
         'test': ['nose', 'scipy'],
-        'develop': ['cython >= ' + min_cython_ver],
     },
     classifiers=[
         "Operating System :: POSIX",
