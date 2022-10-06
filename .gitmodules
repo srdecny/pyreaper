@@ -1,3 +1,4 @@
 [submodule "lib/REAPER"]
 	path = lib/REAPER
-	url = https://github.com/r9y9/REAPER
+	url = https://github.com/Tomiinek/REAPER
+	branch = cleanup
